@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cinder Connect</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main>
+    <h1>Cinder Connect</h1>
+    <div id="state" class="state">Checking...</div>
+    <dl>
+      <dt>PID</dt><dd id="pid">-</dd>
+      <dt>Executable</dt><dd id="exe">-</dd>
+      <dt>Binding</dt><dd id="binding">-</dd>
+    </dl>
+    <div id="detail" class="detail"></div>
+    <button id="refresh" type="button">Refresh</button>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>

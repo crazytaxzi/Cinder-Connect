@@ -1,41 +1,73 @@
 # Cinder-Connect
 
-Firefox-to-Windows exact-process binding bridge.
+Windows-only Firefox-to-process binding bridge.
 
-## Scope
-
-This repository exists for one purpose only:
-
-1. Launch a user-selected Windows application.
-2. Capture the PID Windows actually assigns to that process.
-3. Bind a Firefox add-on to that exact process identity through Firefox Native Messaging.
-4. Refuse stale or mismatched bindings.
-
-It is intentionally **not** a general MIRA repository and should not collect unrelated code.
+Cinder-Connect launches a user-selected Windows application, captures the PID Windows actually assigns, records that process identity, and lets a Firefox add-on verify that it is still attached to that exact process.
 
 ## Important PID rule
 
-Windows assigns process IDs. This project does **not** attempt to reserve or force an arbitrary numeric PID.
+Windows chooses process IDs. This project does **not** reserve or force an arbitrary numeric PID.
 
-Instead, `scripts/launch_and_bind.ps1` launches the configured executable with `Start-Process -PassThru`, captures the assigned PID, executable path, process creation time, and a random binding nonce, then writes the exact binding to:
+Instead, `scripts/launch_and_bind.ps1` launches the configured executable and records:
 
-`%LOCALAPPDATA%\CinderConnect\binding.json`
+- PID
+- actual executable path
+- Windows process creation timestamp (`ToFileTimeUtc()`)
+- random binding UUID
+- binding creation time
 
-The native host validates the PID, executable path, and process creation time before reporting the target as attached. This prevents a stale PID from silently binding to an unrelated process after PID reuse.
+The Firefox native host requires the PID, path, and creation timestamp to all match. A reused PID therefore does not silently bind to a different process.
 
 ## Layout
 
-- `extension/` - Firefox WebExtension.
-- `native-host/` - Firefox Native Messaging host.
-- `scripts/launch_and_bind.ps1` - user-editable application launcher and binder.
-- `scripts/install_native_host.ps1` - registers the native host for the current Windows user.
+- `extension/` - Firefox Manifest V3 add-on
+- `native-host/native_host.ps1` - read-only native-messaging verifier
+- `scripts/launch_and_bind.ps1` - user-editable launcher
+- `scripts/install_native_host.ps1` - current-user Firefox native-host installer
+- `tests/` - parser and native-protocol smoke tests
+## Setup
 
-## Basic setup
-
-1. Edit the clearly marked configuration block at the top of `scripts/launch_and_bind.ps1`.
+1. Edit the USER CONFIG block at the top of `scripts/launch_and_bind.ps1`.
 2. Run `scripts/install_native_host.ps1` once.
-3. Load `extension/manifest.json` as a temporary Firefox add-on from `about:debugging`, or package/sign it later.
-4. Run `scripts/launch_and_bind.ps1`.
-5. Open the Cinder-Connect toolbar popup. It should show the exact bound PID and executable.
+3. In Firefox open `about:debugging` -> **This Firefox** -> **Load Temporary Add-on**.
+4. Select `extension/manifest.json`.
+5. Run `scripts/launch_and_bind.ps1`.
+6. Click the Cinder Connect toolbar button to view the exact bound PID and executable.
 
-The add-on deliberately has no content-script access and no arbitrary webpage-to-native command bridge in this initial version.
+A temporary Firefox add-on is removed when Firefox restarts. Package/sign it later if permanent installation is desired.
+
+## Runtime behavior
+
+The add-on has no content scripts and requests no website permissions. It talks only to the registered native host `cinder_connect`.
+
+The native host accepts only one command: `status`. It cannot launch programs, inject code, read process memory, kill processes, or query an arbitrary PID supplied by a webpage or extension message.
+
+Possible states include:
+
+- `attached` - PID, path, and creation timestamp all match
+- `not_bound` - no binding file exists
+- `stale_pid` - the bound process has exited
+- `path_mismatch` - the PID belongs to another executable
+- `start_time_mismatch` - the PID was reused by a newer process
+- `bad_binding` - the binding file is malformed
+
+The binding file lives at `%LOCALAPPDATA%\CinderConnect\binding.json`.
+## Notes
+
+If the configured executable is only a launcher that immediately spawns another process and exits, Cinder-Connect will correctly report the launcher PID as stale. Point `$TargetExe` at the long-lived executable you actually want to bind.
+
+The native host is installed for the current Windows user under:
+
+`HKCU\Software\Mozilla\NativeMessagingHosts\cinder_connect`
+
+No administrator rights are required for that registration.
+
+## Verified on GamePC
+
+The development smoke test verified:
+
+1. PowerShell source files parse with zero errors.
+2. `launch_and_bind.ps1` launched Notepad and created a binding.
+3. Native messaging returned `attached` with the exact PID/path/binding UUID.
+4. After that process exited, the same binding returned `stale_pid`.
+5. The installed `.bat` host wrapper returned the same correct statuses.
