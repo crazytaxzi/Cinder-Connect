@@ -24,6 +24,7 @@ The Firefox native host requires the PID, path, and creation timestamp to all ma
 - `native-host/native_host.ps1` - read-only native-messaging verifier
 - `scripts/launch_and_bind.ps1` - user-editable launcher
 - `scripts/install_native_host.ps1` - current-user Firefox native-host installer
+- `mcp-server/` - read-only MCP bridge exposing `cinder_status`
 - `tests/` - parser and native-protocol smoke tests
 ## Setup
 
@@ -40,7 +41,7 @@ A temporary Firefox add-on is removed when Firefox restarts. Package/sign it lat
 
 The add-on has no content scripts and requests no website permissions. It talks only to the registered native host `cinder_connect`.
 
-The native host accepts only one command: `status`. It cannot launch programs, inject code, read process memory, kill processes, or query an arbitrary PID supplied by a webpage or extension message.
+The native host accepts read-only `status` and `extension_status` commands. `extension_status` records when Firefox itself last contacted the host; ordinary `status` reads that marker without refreshing it. The host cannot launch programs, inject code, read process memory, kill processes, or query an arbitrary PID supplied by a webpage or extension message.
 
 Possible states include:
 
@@ -52,6 +53,17 @@ Possible states include:
 - `bad_binding` - the binding file is malformed
 
 The binding file lives at `%LOCALAPPDATA%\CinderConnect\binding.json`.
+
+## MCP bridge
+
+`mcp-server/server.py` exposes one read-only tool: `cinder_status`.
+
+Run `mcp-server/setup_mcp.ps1` once to create the dedicated Python environment and install the official MCP SDK. Then run `mcp-server/run_mcp.ps1` to serve Streamable HTTP at `http://127.0.0.1:8765/mcp`.
+
+The MCP result includes the exact binding status plus `extension_seen`, `extension_last_seen_utc`, and the last binding UUID observed from Firefox. A backend status check does not update those Firefox-presence fields.
+
+ChatGPT does not connect directly to localhost MCP endpoints; use a supported secure tunnel or remote deployment when attaching this server to an MCP-capable ChatGPT plan.
+
 ## Notes
 
 If the configured executable is only a launcher that immediately spawns another process and exits, Cinder-Connect will correctly report the launcher PID as stale. Point `$TargetExe` at the long-lived executable you actually want to bind.
