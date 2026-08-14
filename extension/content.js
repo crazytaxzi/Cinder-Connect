@@ -1,3 +1,8 @@
+if (globalThis.__cinderConnectLoaded) {
+  console.debug("Cinder Connect content bridge already loaded");
+} else {
+  globalThis.__cinderConnectLoaded = true;
+
 const port = browser.runtime.connect({ name: "cinder-chat" });
 const KEEP_TURNS = 8;
 const COMMAND_RE = /\[\[CINDER_CMD:v1\]\]\s*([\s\S]*?)\s*\[\[\/CINDER_CMD\]\]/g;
@@ -184,3 +189,5 @@ observer.observe(document.documentElement, { childList: true, subtree: true, cha
 window.addEventListener("popstate", reportConversation);
 reportConversation();
 compactTurns();
+
+}

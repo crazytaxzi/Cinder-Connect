@@ -1,9 +1,10 @@
 {
   "manifest_version": 3,
   "name": "Cinder Connect",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Bridge one exact bound terminal process to a ChatGPT conversation in Firefox.",
-  "permissions": ["nativeMessaging", "storage"],
+  "permissions": ["nativeMessaging", "storage", "scripting"],
+  "host_permissions": ["https://chatgpt.com/*"],
   "action": {
     "default_title": "Cinder Connect",
     "default_popup": "popup.html"

@@ -128,4 +128,24 @@ async function updateBadge(status) {
   });
 }
 
+async function injectExistingChatTabs() {
+  try {
+    const tabs = await browser.tabs.query({ url: "https://chatgpt.com/*" });
+    for (const tab of tabs) {
+      if (!tab.id) continue;
+      try {
+        await browser.scripting.executeScript({
+          target: { tabId: tab.id },
+          files: ["content.js"]
+        });
+      } catch (error) {
+        console.debug("Cinder Connect injection skipped", tab.id, error);
+      }
+    }
+  } catch (error) {
+    console.debug("Cinder Connect tab scan failed", error);
+  }
+}
+
 connectNative();
+injectExistingChatTabs();
