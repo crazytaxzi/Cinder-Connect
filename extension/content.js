@@ -11,6 +11,8 @@ let awaitingReply = false;
 let baselineAssistant = "";
 let settleTimer = null;
 let bridgeHeaderInjected = false;
+const outboundQueue = [];
+let submitInFlight = false;
 
 const BRIDGE_HEADER = `[CINDER_BRIDGE:v1 ACTIVE]\n` +
   `You may append machine commands using [[CINDER_CMD:v1]] JSON [[/CINDER_CMD]]. ` +
@@ -116,19 +118,29 @@ function findSendButton(composer) {
     composer.closest("form")?.querySelector('button[type="submit"]');
 }
 
-async function submitText(text) {
+function queueText(text) {
+  outboundQueue.push(String(text));
+  drainOutbound();
+}
+
+async function drainOutbound() {
+  if (submitInFlight || awaitingReply || isGenerating() || !outboundQueue.length) return;
   const composer = findComposer();
-  if (!composer) throw new Error("ChatGPT composer was not found");
+  if (!composer) return;
+  submitInFlight = true;
+  const text = outboundQueue[0];
   baselineAssistant = latestAssistantText();
-  awaitingReply = true;
   setComposerText(composer, text);
   await new Promise((resolve) => requestAnimationFrame(resolve));
   const send = findSendButton(composer);
   if (!send || send.disabled) {
-    awaitingReply = false;
-    throw new Error("ChatGPT send button is unavailable");
+    submitInFlight = false;
+    return;
   }
+  awaitingReply = true;
+  outboundQueue.shift();
   send.click();
+  submitInFlight = false;
   port.postMessage({ type: "chat.sent", conversation_id: conversationId });
 }
 
@@ -141,6 +153,7 @@ function scheduleAssistantCheck() {
     if (!raw || raw === baselineAssistant) return;
     const { visible, commands } = parseCommands(raw);
     awaitingReply = false;
+    queueMicrotask(drainOutbound);
     port.postMessage({
       type: "assistant.reply",
       conversation_id: conversationId,
@@ -165,11 +178,11 @@ port.onMessage.addListener(async (message) => {
         text = BRIDGE_HEADER + text;
         bridgeHeaderInjected = true;
       }
-      await submitText(text);
+      queueText(text);
       return;
     }
     if (message?.type === "command.batch_result") {
-      await submitText(resultEnvelope(message));
+      queueText(resultEnvelope(message));
     }
   } catch (error) {
     port.postMessage({
@@ -184,10 +197,20 @@ const observer = new MutationObserver(() => {
   reportConversation();
   compactTurns();
   scheduleAssistantCheck();
+  drainOutbound();
 });
-observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+observer.observe(document.documentElement, {
+  childList: true,
+  subtree: true,
+  characterData: true,
+  attributes: true,
+  attributeFilter: ["disabled", "aria-label", "data-testid"]
+});
 window.addEventListener("popstate", reportConversation);
+window.addEventListener("focus", drainOutbound);
+document.addEventListener("visibilitychange", drainOutbound);
 reportConversation();
 compactTurns();
+drainOutbound();
 
 }
