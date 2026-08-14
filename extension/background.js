@@ -4,7 +4,7 @@ async function queryNativeStatus() {
   try {
     const reply = await browser.runtime.sendNativeMessage(
       HOST,
-      { command: "status" }
+      { command: "extension_status" }
     );
     await browser.storage.local.set({ lastStatus: reply });
     await updateBadge(reply);
