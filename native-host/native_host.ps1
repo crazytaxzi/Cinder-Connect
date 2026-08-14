@@ -1,6 +1,7 @@
 $ErrorActionPreference = 'Stop'
 
 $BindingPath = Join-Path $env:LOCALAPPDATA 'CinderConnect\binding.json'
+$ExtensionSeenPath = Join-Path $env:LOCALAPPDATA 'CinderConnect\extension_seen.json'
 $InputStream = [Console]::OpenStandardInput()
 $OutputStream = [Console]::OpenStandardOutput()
 $Reader = New-Object System.IO.BinaryReader($InputStream)
@@ -117,14 +118,55 @@ function Get-BindingStatus {
     $status.bound_utc = [string]$binding.bound_utc
     return $status
 }
+
+function Write-ExtensionSeen {
+    param($Status)
+    $record = [ordered]@{
+        last_seen_utc = [DateTime]::UtcNow.ToString('o')
+        state = [string]$Status.state
+        pid = $Status.pid
+        binding_id = $Status.binding_id
+    }
+    $dir = Split-Path -Parent $ExtensionSeenPath
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    $json = $record | ConvertTo-Json -Depth 4
+    [System.IO.File]::WriteAllText($ExtensionSeenPath, $json, $Utf8)
+}
+
+function Add-ExtensionPresence {
+    param($Status)
+    if (-not (Test-Path -LiteralPath $ExtensionSeenPath)) {
+        $Status.extension_seen = $false
+        return $Status
+    }
+    try {
+        $seen = Get-Content -LiteralPath $ExtensionSeenPath -Raw | ConvertFrom-Json
+        $Status.extension_seen = $true
+        $Status.extension_last_seen_utc = [string]$seen.last_seen_utc
+        $Status.extension_last_state = [string]$seen.state
+        $Status.extension_last_binding_id = [string]$seen.binding_id
+    } catch {
+        $Status.extension_seen = $false
+    }
+    return $Status
+}
+
 while ($true) {
     $message = Read-NativeMessage
     if ($null -eq $message) {
         break
     }
 
+    if ([string]$message.command -eq 'extension_status') {
+        $status = Get-BindingStatus
+        Write-ExtensionSeen $status
+        Write-NativeMessage (Add-ExtensionPresence $status)
+        continue
+    }
+
     if ([string]$message.command -eq 'status') {
-        Write-NativeMessage (Get-BindingStatus)
+        $status = Get-BindingStatus
+        Write-NativeMessage (Add-ExtensionPresence $status)
         continue
     }
 
