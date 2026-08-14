@@ -71,21 +71,36 @@ function Get-BindingStatus {
     try {
         $process = Get-Process -Id $targetProcessId -ErrorAction Stop
         $process.Refresh()
-        $actualPath = Normalize-Path $process.Path
         $actualStart = [int64]$process.StartTime.ToFileTimeUtc()
+        $actualName = [string]$process.ProcessName
     } catch {
         $status = New-Status $false 'stale_pid' 'The bound process is not running.'
         $status.pid = $targetProcessId
         return $status
     }
-    if (-not [StringComparer]::OrdinalIgnoreCase.Equals($expectedPath, $actualPath)) {
-        $status = New-Status $false 'path_mismatch' 'PID belongs to a different executable.'
-        $status.pid = $targetProcessId
-        $status.exe_path = $actualPath
-        return $status
-    }
+
     if ($expectedStart -ne $actualStart) {
         $status = New-Status $false 'start_time_mismatch' 'PID was reused by a newer process.'
+        $status.pid = $targetProcessId
+        return $status
+    }
+
+    $expectedName = [System.IO.Path]::GetFileNameWithoutExtension($expectedPath)
+    if (-not [StringComparer]::OrdinalIgnoreCase.Equals($expectedName, $actualName)) {
+        $status = New-Status $false 'process_name_mismatch' 'PID belongs to a differently named executable.'
+        $status.pid = $targetProcessId
+        $status.process_name = $actualName
+        return $status
+    }
+
+    $actualPath = ''
+    try {
+        $actualPath = Normalize-Path ([string]$process.Path)
+    } catch {}
+
+    $pathVerified = -not [string]::IsNullOrWhiteSpace($actualPath)
+    if ($pathVerified -and -not [StringComparer]::OrdinalIgnoreCase.Equals($expectedPath, $actualPath)) {
+        $status = New-Status $false 'path_mismatch' 'PID belongs to a different executable path.'
         $status.pid = $targetProcessId
         $status.exe_path = $actualPath
         return $status
@@ -93,7 +108,11 @@ function Get-BindingStatus {
 
     $status = New-Status $true 'attached'
     $status.pid = $targetProcessId
-    $status.exe_path = $actualPath
+    $status.exe_path = $(if ($pathVerified) { $actualPath } else { $expectedPath })
+    $status.path_verified = $pathVerified
+    if (-not $pathVerified) {
+        $status.detail = 'Live executable path is hidden by Windows elevation; PID, creation time, and process name matched.'
+    }
     $status.binding_id = [string]$binding.binding_id
     $status.bound_utc = [string]$binding.bound_utc
     return $status
