@@ -17,6 +17,7 @@ MAX_OUTPUT = 32768
 
 conn = None
 send_lock = threading.Lock()
+conn_ready = threading.Event()
 selected_chat = None
 known_chats = set()
 unsafe_mode = False
@@ -34,9 +35,21 @@ def authkey():
 
 
 def send(message):
+    if not conn_ready.wait(timeout=10):
+        print("\n[Cinder-Connect] bridge is not connected yet.\n")
+        return False
     payload = json.dumps(message, separators=(",", ":")).encode("utf-8")
     with send_lock:
-        conn.send_bytes(payload)
+        current = conn
+        if current is None:
+            conn_ready.clear()
+            return False
+        try:
+            current.send_bytes(payload)
+            return True
+        except (EOFError, OSError):
+            conn_ready.clear()
+            return False
 
 
 def clip(value):
@@ -192,12 +205,22 @@ def handle_message(message):
     elif msg_type == "bridge.status":
         print("\n" + json.dumps(message.get("binding"), indent=2) + "\n")
 def reader_loop():
-    try:
-        while True:
+    global conn
+    while True:
+        try:
             raw = conn.recv_bytes()
             handle_message(json.loads(raw.decode("utf-8")))
-    except (EOFError, OSError, json.JSONDecodeError):
-        print("\n[Cinder-Connect] bridge disconnected.\n")
+        except (EOFError, OSError, json.JSONDecodeError, AttributeError):
+            conn_ready.clear()
+            print("\n[Cinder-Connect] bridge disconnected; reconnecting...\n")
+            try:
+                if conn is not None:
+                    conn.close()
+            except Exception:
+                pass
+            conn = None
+            connect_bridge()
+            print("\n[Cinder-Connect] bridge reconnected.\n")
 
 
 def binding_targets_me():
@@ -220,6 +243,7 @@ def connect_bridge():
             continue
         try:
             conn = Client(PIPE_NAME, family="AF_PIPE", authkey=authkey())
+            conn_ready.set()
             return
         except (FileNotFoundError, ConnectionRefusedError, OSError) as exc:
             print(f"[Cinder-Connect] waiting for Firefox bridge: {exc}")
