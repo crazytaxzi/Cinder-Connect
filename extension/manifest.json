@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Cinder Connect",
-  "version": "0.1.0",
-  "description": "Bind Firefox to one exact Windows process identity.",
+  "version": "0.2.0",
+  "description": "Bridge one exact bound terminal process to a ChatGPT conversation in Firefox.",
   "permissions": ["nativeMessaging", "storage"],
   "action": {
     "default_title": "Cinder Connect",
@@ -11,13 +11,16 @@
   "background": {
     "scripts": ["background.js"]
   },
+  "content_scripts": [{
+    "matches": ["https://chatgpt.com/*"],
+    "js": ["content.js"],
+    "run_at": "document_idle"
+  }],
   "browser_specific_settings": {
     "gecko": {
       "id": "cinder-connect@crazytaxzi.local",
       "strict_min_version": "128.0",
-      "data_collection_permissions": {
-        "required": ["none"]
-      }
+      "data_collection_permissions": { "required": ["none"] }
     }
   }
 }

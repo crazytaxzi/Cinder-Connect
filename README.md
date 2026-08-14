@@ -1,85 +1,98 @@
 # Cinder-Connect
 
-Windows-only Firefox-to-process binding bridge.
+Cinder-Connect turns Firefox into an authenticated transport worker for ChatGPT while a lightweight local terminal becomes the human interface.
 
-Cinder-Connect launches a user-selected Windows application, captures the PID Windows actually assigns, records that process identity, and lets a Firefox add-on verify that it is still attached to that exact process.
+No OpenAI API, MCP service, or external relay is required. Firefox remains logged into `chatgpt.com`; Cinder-Connect moves text and command results between that web conversation and one exact local terminal process.
 
-## Important PID rule
+## Architecture
 
-Windows chooses process IDs. This project does **not** reserve or force an arbitrary numeric PID.
+```text
+You <-> Cinder Terminal <-> Windows named pipe <-> Native Messaging host
+                                                    ^
+                                                    |
+                                              Firefox extension
+                                                    |
+                                             chatgpt.com /c/<id>
+                                                    |
+                                                 ChatGPT
+```
 
-Instead, `scripts/launch_and_bind.ps1` launches the configured executable and records:
+The native host is a broker, not a general shell. Local commands are executed by the exact bound terminal process.
+## Exact-process binding
+
+Windows assigns the PID. `scripts/start_cinder_terminal.ps1` launches the terminal and records:
 
 - PID
-- actual executable path
-- Windows process creation timestamp (`ToFileTimeUtc()`)
-- random binding UUID
-- binding creation time
+- executable path
+- Windows process creation FILETIME
+- binding UUID
+- elevation request state
 
-The Firefox native host requires the PID, path, and creation timestamp to all match. A reused PID therefore does not silently bind to a different process.
+The native host asks Windows for the real named-pipe client PID and accepts the terminal only when it is the exact process instance in the binding. A different process cannot simply claim the PID in JSON.
 
-## Layout
+The isolated bridge test verifies both acceptance of the exact bound process and rejection of a different child PID.
 
-- `extension/` - Firefox Manifest V3 add-on
-- `native-host/native_host.ps1` - read-only native-messaging verifier
-- `scripts/launch_and_bind.ps1` - user-editable launcher
-- `scripts/install_native_host.ps1` - current-user Firefox native-host installer
-- `mcp-server/` - read-only MCP bridge exposing `cinder_status`
-- `tests/` - parser and native-protocol smoke tests
+## Firefox bridge
+
+The extension injects `extension/content.js` only on `https://chatgpt.com/*`. Each conversation page reports the UUID from `/c/<conversation-id>` to the background script.
+
+Terminal messages are routed to that exact conversation. If several Cinder-enabled ChatGPT tabs are open, use `/use <conversation-id>` in the terminal instead of relying on a title or active-tab guess.
+The content script watches ChatGPT's rendered conversation with a `MutationObserver`. When an assistant turn finishes, the visible text is forwarded to the terminal.
+
+Older rendered turns are compacted out of layout/paint while the newest eight turns remain visible. This is intentionally conservative: it reduces browser rendering load without physically deleting React-managed conversation nodes.
+
+## Command loop
+
+Assistant replies may append machine-readable command blocks:
+
+```text
+[[CINDER_CMD:v1]]
+{"id":"check-1","action":"shell.run","command":"git status","cwd":"C:\\Projects\\MIRA"}
+[[/CINDER_CMD]]
+```
+
+Command blocks are removed from the text shown in the terminal. The exact bound terminal executes the command batch and returns one `CINDER_RESULT` turn to the same ChatGPT conversation. That result can trigger the next assistant turn without manual copy/paste.
+Supported v1 actions:
+
+- `shell.run`
+- `process.start`
+- `process.stop`
+- `file.read`
+- `file.write`
+- `file.list`
+
+The terminal blocks a small set of obviously destructive shell patterns and commands marked high/critical/destructive risk unless `/unsafe on` is explicitly enabled for that terminal session.
+
 ## Setup
 
-1. Edit the USER CONFIG block at the top of `scripts/launch_and_bind.ps1`.
-2. Run `scripts/install_native_host.ps1` once.
-3. In Firefox open `about:debugging` -> **This Firefox** -> **Load Temporary Add-on**.
-4. Select `extension/manifest.json`.
-5. Run `scripts/launch_and_bind.ps1`.
-6. Click the Cinder Connect toolbar button to view the exact bound PID and executable.
+1. Run `scripts/install_native_host.ps1` once.
+2. In Firefox open `about:debugging` -> **This Firefox**.
+3. Load `extension/manifest.json`, or press **Reload** if Cinder Connect is already loaded.
+4. Run `scripts/start_cinder_terminal.ps1`.
+5. Approve UAC if the launcher is configured for an elevated terminal.
+6. Type in the terminal. Firefox can remain minimized.
 
-A temporary Firefox add-on is removed when Firefox restarts. Package/sign it later if permanent installation is desired.
+The add-on is temporary when loaded through `about:debugging` and must be reloaded after Firefox restarts.
+## Terminal commands
 
-## Runtime behavior
+- `/status` - show exact process/binding state
+- `/chats` - list ChatGPT conversation UUIDs currently connected through Firefox
+- `/use <id>` - select one exact conversation when more than one is open
+- `/unsafe on` - allow locally flagged high-risk command execution for this process lifetime
+- `/unsafe off` - restore high-risk blocking
+- `/quit` - exit
 
-The add-on has no content scripts and requests no website permissions. It talks only to the registered native host `cinder_connect`.
+## Files
 
-The native host accepts read-only `status` and `extension_status` commands. `extension_status` records when Firefox itself last contacted the host; ordinary `status` reads that marker without refreshing it. The host cannot launch programs, inject code, read process memory, kill processes, or query an arbitrary PID supplied by a webpage or extension message.
-
-Possible states include:
-
-- `attached` - PID, path, and creation timestamp all match
-- `not_bound` - no binding file exists
-- `stale_pid` - the bound process has exited
-- `path_mismatch` - the PID belongs to another executable
-- `start_time_mismatch` - the PID was reused by a newer process
-- `bad_binding` - the binding file is malformed
-
-The binding file lives at `%LOCALAPPDATA%\CinderConnect\binding.json`.
-
-## MCP bridge
-
-`mcp-server/server.py` exposes one read-only tool: `cinder_status`.
-
-Run `mcp-server/setup_mcp.ps1` once to create the dedicated Python environment and install the official MCP SDK. Then run `mcp-server/run_mcp.ps1` to serve Streamable HTTP at `http://127.0.0.1:8765/mcp`.
-
-The MCP result includes the exact binding status plus `extension_seen`, `extension_last_seen_utc`, and the last binding UUID observed from Firefox. A backend status check does not update those Firefox-presence fields.
-
-ChatGPT does not connect directly to localhost MCP endpoints; use a supported secure tunnel or remote deployment when attaching this server to an MCP-capable ChatGPT plan.
-
-## Notes
-
-If the configured executable is only a launcher that immediately spawns another process and exits, Cinder-Connect will correctly report the launcher PID as stale. Point `$TargetExe` at the long-lived executable you actually want to bind.
-
-The native host is installed for the current Windows user under:
-
-`HKCU\Software\Mozilla\NativeMessagingHosts\cinder_connect`
-
-No administrator rights are required for that registration.
+- `extension/manifest.json` - Firefox MV3 manifest
+- `extension/background.js` - persistent Native Messaging and exact-chat router
+- `extension/content.js` - ChatGPT page transport, response capture, render compaction
+- `native-host/native_host.py` - Native Messaging/named-pipe broker
+- `terminal/cinder_terminal.py` - terminal UI and local executor
+- `scripts/install_native_host.ps1` - per-user Firefox native-host installer
+- `scripts/start_cinder_terminal.ps1` - exact terminal launcher/binder
+- `scripts/launch_and_bind.ps1` - generic user-editable process binder retained for other uses
 
 ## Verified on GamePC
 
-The development smoke test verified:
-
-1. PowerShell source files parse with zero errors.
-2. `launch_and_bind.ps1` launched Notepad and created a binding.
-3. Native messaging returned `attached` with the exact PID/path/binding UUID.
-4. After that process exited, the same binding returned `stale_pid`.
-5. The installed `.bat` host wrapper returned the same correct statuses.
+Python, JavaScript, JSON, and PowerShell sources pass syntax/parse checks. `tests/test_pipe_bridge.py` verifies exact PID acceptance plus mismatched PID rejection. `tests/test_terminal_executor.py` verifies file read/write/list, PowerShell execution, and local high-risk blocking.

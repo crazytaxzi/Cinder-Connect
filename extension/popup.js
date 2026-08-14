@@ -3,6 +3,8 @@ const stateEl = document.getElementById("state");
 const processEl = document.getElementById("pid");
 const exeEl = document.getElementById("exe");
 const bindingEl = document.getElementById("binding");
+const terminalEl = document.getElementById("terminal");
+const chatEl = document.getElementById("chat");
 const detailEl = document.getElementById("detail");
 const refreshEl = document.getElementById("refresh");
 function render(status) {
@@ -14,6 +16,9 @@ function renderDetails(status) {
   processEl.textContent = status?.pid ?? "-";
   exeEl.textContent = status?.exe_path ?? "-";
   bindingEl.textContent = status?.binding_id ?? "-";
+  terminalEl.textContent = status?.terminal_connected ? `PID ${status.terminal_pid}` : "Not connected";
+  const chats = status?.chat_conversations || [];
+  chatEl.textContent = chats.length ? chats.join(", ") : "Not connected";
   detailEl.textContent = status?.error || status?.detail || "";
 }
 async function refresh() {
