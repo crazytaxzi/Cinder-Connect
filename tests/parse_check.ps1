@@ -1,7 +1,9 @@
 $files = @(
     'C:\Projects\Cinder-Connect\native-host\native_host.ps1',
     'C:\Projects\Cinder-Connect\scripts\launch_and_bind.ps1',
-    'C:\Projects\Cinder-Connect\scripts\install_native_host.ps1'
+    'C:\Projects\Cinder-Connect\scripts\install_native_host.ps1',
+    'C:\Projects\Cinder-Connect\mcp-server\setup_mcp.ps1',
+    'C:\Projects\Cinder-Connect\mcp-server\run_mcp.ps1'
 )
 
 foreach ($file in $files) {
